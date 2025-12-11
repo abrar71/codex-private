@@ -11,6 +11,7 @@ use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
+use reqwest::StatusCode;
 use reqwest::header::AUTHORIZATION;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
@@ -18,6 +19,10 @@ use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
 use serde::de::DeserializeOwned;
+use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathStyle {
@@ -45,6 +50,7 @@ pub struct Client {
     user_agent: Option<HeaderValue>,
     chatgpt_account_id: Option<String>,
     path_style: PathStyle,
+    debug_output: Option<PathBuf>,
 }
 
 impl Client {
@@ -70,6 +76,7 @@ impl Client {
             user_agent: None,
             chatgpt_account_id: None,
             path_style,
+            debug_output: None,
         })
     }
 
@@ -106,6 +113,11 @@ impl Client {
         self
     }
 
+    pub fn with_debug_output(mut self, output: Option<PathBuf>) -> Self {
+        self.debug_output = output;
+        self
+    }
+
     fn headers(&self) -> HeaderMap {
         let mut h = HeaderMap::new();
         if let Some(ua) = &self.user_agent {
@@ -134,8 +146,14 @@ impl Client {
         method: &str,
         url: &str,
     ) -> Result<(String, String)> {
+        let request_log = if self.path_style == PathStyle::ChatGptApi {
+            self.capture_request_log(&req)
+        } else {
+            None
+        };
         let res = req.send().await?;
         let status = res.status();
+        let response_headers = res.headers().clone();
         let ct = res
             .headers()
             .get(CONTENT_TYPE)
@@ -143,6 +161,15 @@ impl Client {
             .unwrap_or("")
             .to_string();
         let body = res.text().await.unwrap_or_default();
+        self.log_chatgpt_request(
+            method,
+            url,
+            status,
+            &ct,
+            request_log.as_ref(),
+            &response_headers,
+            &body,
+        );
         if !status.is_success() {
             anyhow::bail!("{method} {url} failed: {status}; content-type={ct}; body={body}");
         }
@@ -156,6 +183,56 @@ impl Client {
                 anyhow::bail!("Decode error for {url}: {e}; content-type={ct}; body={body}");
             }
         }
+    }
+
+    fn log_chatgpt_request(
+        &self,
+        method: &str,
+        url: &str,
+        status: StatusCode,
+        ct: &str,
+        request_log: Option<&RequestLog>,
+        response_headers: &HeaderMap,
+        response_body: &str,
+    ) {
+        if self.path_style != PathStyle::ChatGptApi {
+            return;
+        }
+        let request_ids = extract_request_ids_from_response_headers(response_headers);
+        let request_headers = request_log.map(|log| log.headers.clone());
+        let request_body = request_log.and_then(|log| log.body.clone());
+        let response_headers = header_pairs(response_headers);
+        write_chatgpt_http_log(
+            method,
+            url,
+            status,
+            ct,
+            &request_ids,
+            request_headers.as_ref(),
+            request_body.as_deref(),
+            &response_headers,
+            response_body,
+            self.debug_output.as_deref(),
+        );
+        tracing::info!(
+            method = %method,
+            url = %url,
+            status = %status,
+            content_type = %ct,
+            request_ids = ?request_ids,
+            request_headers = ?request_headers.as_ref(),
+            request_body = ?request_body,
+            response_headers = ?response_headers,
+            response_body = %response_body,
+            "ChatGPT request completed"
+        );
+    }
+
+    fn capture_request_log(&self, req: &reqwest::RequestBuilder) -> Option<RequestLog> {
+        let request = req.try_clone()?.build().ok()?;
+        let headers = header_pairs(request.headers());
+        let body = body_to_string(request.body());
+        Some(RequestLog { headers, body })
     }
 
     pub async fn get_rate_limits(&self) -> Result<RateLimitSnapshot> {
@@ -351,5 +428,100 @@ impl Client {
 
         let seconds_i64 = i64::from(seconds);
         Some((seconds_i64 + 59) / 60)
+    }
+}
+
+fn extract_request_ids_from_response_headers(headers: &HeaderMap) -> HashMap<String, String> {
+    ["cf-ray", "x-request-id", "x-oai-request-id"]
+        .iter()
+        .filter_map(|&name| {
+            let header_name = HeaderName::from_static(name);
+            let value = headers.get(header_name)?;
+            let value = header_value_to_string(value)?;
+            Some((name.to_string(), value))
+        })
+        .collect()
+}
+
+fn header_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| header_value_to_string(value).map(|v| (name.to_string(), v)))
+        .collect()
+}
+
+fn header_value_to_string(value: &HeaderValue) -> Option<String> {
+    value
+        .to_str()
+        .map(str::to_string)
+        .ok()
+        .or_else(|| Some(String::from_utf8_lossy(value.as_bytes()).into_owned()))
+}
+
+fn body_to_string(body: Option<&reqwest::Body>) -> Option<String> {
+    let body = body?;
+    match body.as_bytes() {
+        Some(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+        None => Some("<non-replayable body>".to_string()),
+    }
+}
+
+#[derive(Clone)]
+struct RequestLog {
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+}
+
+fn write_chatgpt_http_log(
+    method: &str,
+    url: &str,
+    status: StatusCode,
+    content_type: &str,
+    request_ids: &HashMap<String, String>,
+    request_headers: Option<&Vec<(String, String)>>,
+    request_body: Option<&str>,
+    response_headers: &[(String, String)],
+    response_body: &str,
+    debug_output: Option<&Path>,
+) {
+    let mut entry = String::new();
+    let _ = writeln!(
+        &mut entry,
+        "ChatGPT HTTP {method} {url} status={} content-type={content_type} request_ids={request_ids:?}",
+        status.as_u16()
+    );
+    if let Some(headers) = request_headers {
+        let _ = writeln!(&mut entry, "request_headers={headers:?}");
+    }
+    if let Some(body) = request_body {
+        let _ = writeln!(&mut entry, "request_body={body}");
+    }
+    let _ = writeln!(&mut entry, "response_headers={response_headers:?}");
+    let _ = writeln!(&mut entry, "response_body={response_body}");
+
+    append_log_entry(&entry, Path::new("chatgpt-http.log"));
+    if let Some(path) = debug_output {
+        if path != Path::new("chatgpt-http.log") {
+            append_log_entry(&entry, path);
+        }
+    }
+}
+
+fn append_log_entry(entry: &str, path: &Path) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        use std::io::Write as _;
+        let _ = writeln!(f, "{entry}");
     }
 }

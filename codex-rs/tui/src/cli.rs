@@ -15,6 +15,10 @@ pub struct Cli {
     #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',', num_args = 1..)]
     pub images: Vec<PathBuf>,
 
+    /// Write HTTP debug output to a file.
+    #[arg(long = "debug-file", value_name = "FILE", value_hint = ValueHint::FilePath)]
+    pub debug_file: Option<PathBuf>,
+
     // Internal controls set by the top-level `codex resume` subcommand.
     // These are not exposed as user flags on the base `codex` command.
     #[clap(skip)]
