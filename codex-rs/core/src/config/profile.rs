@@ -30,6 +30,9 @@ pub struct ConfigProfile {
     pub experimental_sandbox_command_assessment: Option<bool>,
     pub tools_web_search: Option<bool>,
     pub tools_view_image: Option<bool>,
+    pub debug_http: Option<bool>,
+    /// Optional file to write HTTP debug logs to.
+    pub debug_http_output: Option<PathBuf>,
     /// Optional feature toggles scoped to this profile.
     #[serde(default)]
     pub features: Option<crate::features::FeaturesToml>,

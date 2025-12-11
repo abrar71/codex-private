@@ -1086,7 +1086,8 @@ impl CodexMessageProcessor {
                 code: INTERNAL_ERROR_CODE,
                 message: format!("failed to construct backend client: {err}"),
                 data: None,
-            })?;
+            })?
+            .with_debug_output(self.config.debug_http_output.clone());
 
         client
             .get_rate_limits()

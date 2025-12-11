@@ -114,6 +114,12 @@ pub struct Config {
     /// Defaults to `false`.
     pub show_raw_agent_reasoning: bool,
 
+    /// When set, capture the full HTTP request/response bodies for model traffic.
+    pub debug_http: bool,
+
+    /// Optional file to write HTTP debug logs to.
+    pub debug_http_output: Option<PathBuf>,
+
     /// User-provided instructions from AGENTS.md.
     pub user_instructions: Option<String>,
 
@@ -684,6 +690,12 @@ pub struct ConfigToml {
     /// Defaults to `false`.
     pub show_raw_agent_reasoning: Option<bool>,
 
+    /// When set, capture the full HTTP request/response bodies for model traffic.
+    pub debug_http: Option<bool>,
+
+    /// Optional file to write HTTP debug logs to.
+    pub debug_http_output: Option<PathBuf>,
+
     pub model_reasoning_effort: Option<ReasoningEffort>,
     pub model_reasoning_summary: Option<ReasoningSummary>,
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
@@ -918,6 +930,8 @@ pub struct ConfigOverrides {
     pub compact_prompt: Option<String>,
     pub include_apply_patch_tool: Option<bool>,
     pub show_raw_agent_reasoning: Option<bool>,
+    pub debug_http: Option<bool>,
+    pub debug_http_output: Option<PathBuf>,
     pub tools_web_search_request: Option<bool>,
     pub experimental_sandbox_command_assessment: Option<bool>,
     /// Additional directories that should be treated as writable roots for this session.
@@ -977,6 +991,8 @@ impl Config {
             compact_prompt,
             include_apply_patch_tool: include_apply_patch_tool_override,
             show_raw_agent_reasoning,
+            debug_http,
+            debug_http_output,
             tools_web_search_request: override_tools_web_search_request,
             experimental_sandbox_command_assessment: sandbox_command_assessment_override,
             additional_writable_roots,
@@ -1164,6 +1180,14 @@ impl Config {
             .unwrap_or_else(default_review_model);
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
+        let debug_http_output = debug_http_output
+            .or_else(|| config_profile.debug_http_output.clone())
+            .or_else(|| cfg.debug_http_output.clone());
+        let debug_http = debug_http
+            .or(config_profile.debug_http)
+            .or(cfg.debug_http)
+            .unwrap_or(false)
+            || debug_http_output.is_some();
 
         let config = Self {
             model,
@@ -1216,6 +1240,8 @@ impl Config {
                 .show_raw_agent_reasoning
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
+            debug_http,
+            debug_http_output,
             model_reasoning_effort: config_profile
                 .model_reasoning_effort
                 .or(cfg.model_reasoning_effort),
@@ -2977,6 +3003,8 @@ model_verbosity = "high"
                 codex_linux_sandbox_exe: None,
                 hide_agent_reasoning: false,
                 show_raw_agent_reasoning: false,
+                debug_http: false,
+                debug_http_output: None,
                 model_reasoning_effort: Some(ReasoningEffort::High),
                 model_reasoning_summary: ReasoningSummary::Detailed,
                 model_supports_reasoning_summaries: None,
@@ -3052,6 +3080,8 @@ model_verbosity = "high"
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,
+            debug_http: false,
+            debug_http_output: None,
             model_reasoning_effort: None,
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
@@ -3142,6 +3172,8 @@ model_verbosity = "high"
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,
+            debug_http: false,
+            debug_http_output: None,
             model_reasoning_effort: None,
             model_reasoning_summary: ReasoningSummary::default(),
             model_supports_reasoning_summaries: None,
@@ -3218,6 +3250,8 @@ model_verbosity = "high"
             codex_linux_sandbox_exe: None,
             hide_agent_reasoning: false,
             show_raw_agent_reasoning: false,
+            debug_http: false,
+            debug_http_output: None,
             model_reasoning_effort: Some(ReasoningEffort::High),
             model_reasoning_summary: ReasoningSummary::Detailed,
             model_supports_reasoning_summaries: None,

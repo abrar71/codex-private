@@ -6,6 +6,8 @@
 use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
+use chrono::DateTime;
+use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_common::oss::ensure_oss_provider_ready;
 use codex_common::oss::get_default_model_for_oss_provider;
@@ -100,10 +102,22 @@ use std::io::Write as _;
 
 // (tests access modules directly within the crate)
 
+fn timestamped_debug_file_path(path: PathBuf) -> PathBuf {
+    timestamped_debug_file_path_for_time(path, Utc::now())
+}
+
+fn timestamped_debug_file_path_for_time(path: PathBuf, now: DateTime<Utc>) -> PathBuf {
+    let mut debug_file = path.into_os_string();
+    debug_file.push(format!("-{}.txt", now.format("%Y-%m-%dT%H-%M-%S%.3f")));
+    debug_file.into()
+}
+
 pub async fn run_main(
     mut cli: Cli,
     codex_linux_sandbox_exe: Option<PathBuf>,
 ) -> std::io::Result<AppExitInfo> {
+    cli.debug_file = cli.debug_file.map(timestamped_debug_file_path);
+
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -217,6 +231,8 @@ pub async fn run_main(
         compact_prompt: None,
         include_apply_patch_tool: None,
         show_raw_agent_reasoning: cli.oss.then_some(true),
+        debug_http: cli.debug_file.is_some().then_some(true),
+        debug_http_output: cli.debug_file.clone(),
         tools_web_search_request: None,
         experimental_sandbox_command_assessment: None,
         additional_writable_roots: additional_dirs,
@@ -608,9 +624,11 @@ fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use codex_core::config::ConfigOverrides;
     use codex_core::config::ConfigToml;
     use codex_core::config::ProjectConfig;
+    use pretty_assertions::assert_eq;
     use serial_test::serial;
     use tempfile::TempDir;
 
@@ -640,6 +658,31 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[test]
+    fn debug_file_path_adds_timestamp_suffix() {
+        let now = Utc.with_ymd_and_hms(2024, 5, 17, 12, 34, 56).unwrap()
+            + chrono::Duration::milliseconds(789);
+        let debug_file = PathBuf::from("/tmp/debug-output");
+        let expected = PathBuf::from("/tmp/debug-output-2024-05-17T12-34-56.789.txt");
+
+        assert_eq!(
+            expected,
+            timestamped_debug_file_path_for_time(debug_file, now)
+        );
+    }
+
+    #[test]
+    fn debug_file_path_handles_existing_extension() {
+        let now = Utc.with_ymd_and_hms(2024, 6, 1, 1, 2, 3).unwrap();
+        let debug_file = PathBuf::from("output.log");
+        let expected = PathBuf::from("output.log-2024-06-01T01-02-03.000.txt");
+
+        assert_eq!(
+            expected,
+            timestamped_debug_file_path_for_time(debug_file, now)
+        );
     }
     #[test]
     #[serial]

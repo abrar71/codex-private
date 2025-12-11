@@ -2056,12 +2056,15 @@ impl ChatWidget {
 
         let base_url = self.config.chatgpt_base_url.clone();
         let app_event_tx = self.app_event_tx.clone();
+        let debug_output = self.config.debug_http_output.clone();
 
         let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
 
             loop {
-                if let Some(snapshot) = fetch_rate_limits(base_url.clone(), auth.clone()).await {
+                if let Some(snapshot) =
+                    fetch_rate_limits(base_url.clone(), auth.clone(), debug_output.clone()).await
+                {
                     app_event_tx.send(AppEvent::RateLimitSnapshotFetched(snapshot));
                 }
                 interval.tick().await;
@@ -3399,8 +3402,15 @@ fn extract_first_bold(s: &str) -> Option<String> {
     None
 }
 
-async fn fetch_rate_limits(base_url: String, auth: CodexAuth) -> Option<RateLimitSnapshot> {
-    match BackendClient::from_auth(base_url, &auth).await {
+async fn fetch_rate_limits(
+    base_url: String,
+    auth: CodexAuth,
+    debug_output: Option<PathBuf>,
+) -> Option<RateLimitSnapshot> {
+    match BackendClient::from_auth(base_url, &auth)
+        .await
+        .map(|client| client.with_debug_output(debug_output))
+    {
         Ok(client) => match client.get_rate_limits().await {
             Ok(snapshot) => Some(snapshot),
             Err(err) => {
