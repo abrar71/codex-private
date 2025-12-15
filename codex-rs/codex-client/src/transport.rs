@@ -1,4 +1,6 @@
 use crate::error::TransportError;
+use crate::http_debug_log::create_http_debug_entry;
+use crate::http_debug_log::encode_http_debug_entry;
 use crate::request::Request;
 use crate::request::Response;
 use async_trait::async_trait;
@@ -15,7 +17,6 @@ use http::header::CONTENT_TYPE;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Write as _;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::fs::create_dir_all;
@@ -208,23 +209,20 @@ fn log_http_entry(
 ) {
     let request_ids = extract_request_ids_from_response_headers(response_headers);
     let response_headers = header_pairs(response_headers);
-
-    let mut entry = String::new();
-    let _ = writeln!(
-        &mut entry,
-        "ChatGPT HTTP {method} {url} status={} content-type={content_type} request_ids={request_ids:?}",
-        status.as_u16()
+    let entry = create_http_debug_entry(
+        method,
+        url,
+        status,
+        content_type,
+        &request_ids,
+        Some(&request_log.headers),
+        request_log.body.as_deref(),
+        &response_headers,
+        response_body,
     );
-    if !request_log.headers.is_empty() {
-        let _ = writeln!(&mut entry, "request_headers={:?}", request_log.headers);
+    if let Some(line) = encode_http_debug_entry(&entry) {
+        sink.write_entry(&line);
     }
-    if let Some(body) = &request_log.body {
-        let _ = writeln!(&mut entry, "request_body={body}");
-    }
-    let _ = writeln!(&mut entry, "response_headers={response_headers:?}");
-    let _ = writeln!(&mut entry, "response_body={response_body}");
-
-    sink.write_entry(entry.trim_end());
 }
 
 #[async_trait]

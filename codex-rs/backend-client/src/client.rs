@@ -5,6 +5,8 @@ use crate::types::RateLimitStatusPayload;
 use crate::types::RateLimitWindowSnapshot;
 use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
+use codex_client::append_http_debug_entry;
+use codex_client::create_http_debug_entry;
 use codex_core::auth::CodexAuth;
 use codex_core::default_client::get_codex_user_agent;
 use codex_protocol::account::PlanType as AccountPlanType;
@@ -20,8 +22,6 @@ use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::path::Path;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,18 +206,18 @@ impl Client {
         let request_headers = request_log.map(|log| log.headers.clone());
         let request_body = request_log.and_then(|log| log.body.clone());
         let response_headers = header_pairs(response_headers);
-        write_chatgpt_http_log(
+        let entry = create_http_debug_entry(
             method,
             url,
             status,
             ct,
             &request_ids,
-            request_headers.as_ref(),
+            request_headers.as_deref(),
             request_body.as_deref(),
             &response_headers,
             response_body,
-            debug_output,
         );
+        append_http_debug_entry(&entry, debug_output);
         tracing::info!(
             method = %method,
             url = %url,
@@ -474,53 +474,4 @@ fn body_to_string(body: Option<&reqwest::Body>) -> Option<String> {
 struct RequestLog {
     headers: Vec<(String, String)>,
     body: Option<String>,
-}
-
-fn write_chatgpt_http_log(
-    method: &str,
-    url: &str,
-    status: StatusCode,
-    content_type: &str,
-    request_ids: &HashMap<String, String>,
-    request_headers: Option<&Vec<(String, String)>>,
-    request_body: Option<&str>,
-    response_headers: &[(String, String)],
-    response_body: &str,
-    debug_output: &Path,
-) {
-    let mut entry = String::new();
-    let _ = writeln!(
-        &mut entry,
-        "ChatGPT HTTP {method} {url} status={} content-type={content_type} request_ids={request_ids:?}",
-        status.as_u16()
-    );
-    if let Some(headers) = request_headers {
-        let _ = writeln!(&mut entry, "request_headers={headers:?}");
-    }
-    if let Some(body) = request_body {
-        let _ = writeln!(&mut entry, "request_body={body}");
-    }
-    let _ = writeln!(&mut entry, "response_headers={response_headers:?}");
-    let _ = writeln!(&mut entry, "response_body={response_body}");
-
-    append_log_entry(&entry, debug_output);
-}
-
-fn append_log_entry(entry: &str, path: &Path) {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        if std::fs::create_dir_all(parent).is_err() {
-            return;
-        }
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        use std::io::Write as _;
-        let _ = writeln!(f, "{entry}");
-    }
 }

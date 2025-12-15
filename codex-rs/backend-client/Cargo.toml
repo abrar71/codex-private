@@ -16,6 +16,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 codex-backend-openapi-models = { path = "../codex-backend-openapi-models" }
 codex-protocol = { workspace = true }
 codex-core = { workspace = true }
+codex-client = { path = "../codex-client" }
+chrono = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 
 [dev-dependencies]

@@ -1,4 +1,5 @@
 mod error;
+mod http_debug_log;
 mod request;
 mod retry;
 mod sse;
@@ -7,6 +8,10 @@ mod transport;
 
 pub use crate::error::StreamError;
 pub use crate::error::TransportError;
+pub use crate::http_debug_log::HttpDebugLogEntry;
+pub use crate::http_debug_log::append_http_debug_entry;
+pub use crate::http_debug_log::create_http_debug_entry;
+pub use crate::http_debug_log::encode_http_debug_entry;
 pub use crate::request::Request;
 pub use crate::request::Response;
 pub use crate::retry::RetryOn;

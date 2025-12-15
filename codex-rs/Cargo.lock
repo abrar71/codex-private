@@ -982,7 +982,9 @@ name = "codex-backend-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "codex-backend-openapi-models",
+ "codex-client",
  "codex-core",
  "codex-protocol",
  "pretty_assertions",
@@ -1064,6 +1066,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "chrono",
  "eventsource-stream",
  "futures",
  "http",
